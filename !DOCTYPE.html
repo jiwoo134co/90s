@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>90s Magazine Cam</title>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
     <style>
+        /* 폰트 로딩 에러 시 기본 폰트로 작동하도록 설정 */
         @font-face {
             font-family: 'VintageFont';
             src: url('./Typo_SsangmunDongB.ttf') format('truetype');
@@ -14,7 +14,7 @@
         body { 
             margin: 0; 
             overflow: hidden; 
-            background-color: #000; 
+            background-color: #000; /* 무조건 검은 화면부터 띄우도록 보장 */
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -29,7 +29,7 @@
         #canvas {
             width: 100vw;
             height: 100vh;
-            object-fit: cover; /* 화면을 꽉 채우되, 찌그러지지 않게 잘라냄 */
+            object-fit: cover;
             filter: sepia(0.2) saturate(0.65) contrast(1.15) brightness(1.03);
         }
 
@@ -80,6 +80,7 @@
             top: 0; left: 0; width: 100%; height: 100%;
             background: #111;
             display: flex;
+            flex-direction: column; /* 에러 메시지를 밑에 띄우기 위함 */
             justify-content: center;
             align-items: center;
             font-size: 1.2rem;
@@ -87,11 +88,24 @@
             color: #aaa;
             font-family: 'VintageFont', sans-serif;
         }
+
+        /* 스마트폰 화면에서 문제 원인을 알려줄 에러 창 */
+        #error-msg {
+            color: #ff5555;
+            margin-top: 20px;
+            font-size: 0.9rem;
+            text-align: center;
+            padding: 0 20px;
+            font-family: sans-serif;
+        }
     </style>
 </head>
 <body>
 
-<div id="loading-overlay">필터 및 폰트 로딩 중...</div>
+<div id="loading-overlay">
+    <div>필터 및 AI 모델 로딩 중...</div>
+    <div id="error-msg"></div> </div>
+
 <video id="video" autoplay playsinline muted></video>
 <canvas id="canvas"></canvas>
 
@@ -104,7 +118,18 @@
     <div class="date-stamp" id="dateDisplay"></div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
+
 <script>
+    // 에러를 핸드폰 화면에 직접 띄워주는 안전장치
+    function showError(msg) {
+        document.getElementById('error-msg').innerText += msg + '\n';
+    }
+    window.onerror = function(msg, url, lineNo) {
+        showError(`오류: ${msg} (줄: ${lineNo})`);
+        return false;
+    };
+
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
@@ -124,7 +149,6 @@
     async function setupCamera() {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
-                // 핸드폰 환경에 맞춰서 해상도를 유연하게 요청합니다.
                 video: { facingMode: 'environment', width: { ideal: 1080 }, height: { ideal: 1920 } }
             });
             video.srcObject = stream;
@@ -132,23 +156,27 @@
                 video.onloadedmetadata = () => resolve(video);
             });
         } catch (error) {
-            alert("카메라 권한을 허용해주세요!");
+            showError("카메라 권한을 허용해주세요!");
+            throw error;
         }
     }
 
     async function initSegmentation() {
-        selfieSegmentation = new SelfieSegmentation({locateFile: (file) => {
-            return `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`;
-        }});
-        selfieSegmentation.setOptions({ modelSelection: 1 });
-        selfieSegmentation.onResults(onResults);
+        try {
+            selfieSegmentation = new SelfieSegmentation({locateFile: (file) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`;
+            }});
+            selfieSegmentation.setOptions({ modelSelection: 1 });
+            selfieSegmentation.onResults(onResults);
+        } catch (error) {
+            showError("AI 모델을 불러오지 못했습니다.");
+            throw error;
+        }
     }
 
     function onResults(results) {
         if (!video.videoWidth) return;
 
-        // [비율 해결의 핵심!] 
-        // 캔버스 크기를 억지로 고정하지 않고, 실제 카메라 영상 크기(가로/세로)와 똑같이 맞춥니다.
         if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
@@ -179,9 +207,9 @@
             const color = getToneDownColor(originalImage);
             context.fillStyle = color;
             
-            // 화면 너비에 비례하게 글씨 크기를 설정하여 세로 화면에서도 짤리지 않게 함
             const fontSize = Math.floor(w * 0.15); 
-            context.font = `${fontSize}px 'VintageFont'`; 
+            // 폰트가 깨지더라도 글씨가 나오도록 sans-serif 예외 처리 추가
+            context.font = `${fontSize}px 'VintageFont', sans-serif`; 
             context.textAlign = 'center';
             context.textBaseline = 'middle';
             
@@ -232,15 +260,19 @@
     }
 
     async function startApp() {
-        loadingOverlay.style.display = 'flex';
-        await setupCamera();
-        video.play();
-        await initSegmentation();
-        loadingOverlay.style.display = 'none';
-        drawFrame(); 
+        try {
+            await setupCamera();
+            video.play();
+            await initSegmentation();
+            loadingOverlay.style.display = 'none';
+            drawFrame(); 
+        } catch (e) {
+            showError("실행 중 오류가 발생했습니다.");
+        }
     }
 
-    document.fonts.ready.then(() => {
+    // [핵심 수정] 폰트를 무한정 기다리지 않고, 페이지 뼈대가 로드되면 바로 카메라부터 켭니다.
+    window.addEventListener('load', () => {
         startApp();
     });
 </script>
