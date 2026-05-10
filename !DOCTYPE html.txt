@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>90s Magazine Cam</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
+    <style>
+        /* 깃허브에 같이 올릴 쌍문동 폰트 파일을 바로 연결합니다 */
+        @font-face {
+            font-family: 'VintageFont';
+            src: url('./Typo_SsangmunDongB.ttf') format('truetype');
+        }
+
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background-color: #000; 
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            color: white;
+            font-family: sans-serif;
+        }
+        
+        #video { display: none; } 
+        
+        #canvas {
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+            /* 90년대 물빠진 필름 색감 */
+            filter: sepia(0.2) saturate(0.65) contrast(1.15) brightness(1.03);
+        }
+
+        /* 옛날 카메라 날짜 UI */
+        .ui-overlay {
+            position: absolute;
+            bottom: 60px;
+            right: 30px;
+            text-align: right;
+            color: #ffb84d; 
+            font-family: 'Courier New', Courier, monospace;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            pointer-events: none; 
+        }
+        .date-stamp {
+            font-size: 1.5rem;
+            font-weight: bold;
+            letter-spacing: 2px;
+        }
+
+        /* 텍스트 입력창 */
+        #input-container {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            background: rgba(0,0,0,0.6);
+            padding: 10px;
+            border-radius: 5px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        #input-container label {
+            font-size: 0.9rem;
+            color: #ddd;
+        }
+        input[type="text"] {
+            padding: 8px;
+            font-size: 1rem;
+            border: 1px solid #777;
+            background-color: rgba(0,0,0,0.5);
+            color: white;
+            outline: none;
+            font-family: 'VintageFont', sans-serif;
+        }
+        
+        #loading-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #111;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.2rem;
+            z-index: 100;
+            color: #aaa;
+            font-family: 'VintageFont', sans-serif;
+        }
+    </style>
+</head>
+<body>
+
+<div id="loading-overlay">필터 및 폰트 로딩 중...</div>
+<video id="video" autoplay playsinline muted></video>
+<canvas id="canvas"></canvas>
+
+<div id="input-container">
+    <label>배경에 들어갈 문구:</label>
+    <input type="text" id="userText" placeholder="예: 집적(集積) 또는 하랑">
+</div>
+
+<div class="ui-overlay">
+    <div class="date-stamp" id="dateDisplay"></div>
+</div>
+
+<script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const userTextInput = document.getElementById('userText');
+    const loadingOverlay = document.getElementById('loading-overlay');
+
+    const renderWidth = 1280;
+    const renderHeight = 720;
+    
+    let selfieSegmentation;
+    let userText = "";
+    let personMask = null;
+
+    const today = new Date();
+    const yy = String(today.getFullYear()).slice(-2);
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    document.getElementById('dateDisplay').innerText = `'${yy} ${mm} ${dd}`;
+
+    async function setupCamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+            });
+            video.srcObject = stream;
+            return new Promise((resolve) => {
+                video.onloadedmetadata = () => resolve(video);
+            });
+        } catch (error) {
+            alert("카메라 권한을 허용해주세요!");
+        }
+    }
+
+    async function initSegmentation() {
+        selfieSegmentation = new SelfieSegmentation({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`;
+        }});
+        selfieSegmentation.setOptions({ modelSelection: 1 });
+        selfieSegmentation.onResults(onResults);
+    }
+
+    function onResults(results) {
+        if (!video.videoWidth) return;
+
+        if (canvas.width !== renderWidth) {
+            canvas.width = renderWidth;
+            canvas.height = renderHeight;
+        }
+
+        ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+        personMask = results.segmentationMask;
+        userText = userTextInput.value;
+        
+        if (userText !== "" && personMask) {
+            drawTextBehindPerson(ctx, canvas.width, canvas.height, results.image, personMask);
+        }
+
+        addSoftGrain(ctx, canvas.width, canvas.height);
+    }
+
+    function drawTextBehindPerson(context, w, h, originalImage, mask) {
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = w;
+        tempCanvas.height = h;
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.drawImage(originalImage, 0, 0, w, h);
+        tempCtx.globalCompositeOperation = 'destination-in'; 
+        tempCtx.drawImage(mask, 0, 0, w, h);
+        
+        if (userText !== "") {
+            const color = getToneDownColor(originalImage);
+            context.fillStyle = color;
+            context.font = "120px 'VintageFont'"; 
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            
+            context.fillText(userText, w / 2, h / 2.2); 
+        }
+
+        context.drawImage(tempCanvas, 0, 0, w, h);
+    }
+
+    function getToneDownColor(image) {
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = 50; 
+        tempCanvas.height = 50;
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.drawImage(image, 0, 0, 50, 50);
+        
+        const imageData = tempCtx.getImageData(0, 0, 50, 50).data;
+        let r = 0, g = 0, b = 0;
+        for (let i = 0; i < imageData.length; i += 4) {
+            r += imageData[i];
+            g += imageData[i+1];
+            b += imageData[i+2];
+        }
+        const pixelCount = imageData.length / 4;
+        r = Math.floor(r / pixelCount);
+        g = Math.floor(g / pixelCount);
+        b = Math.floor(b / pixelCount);
+
+        return `rgba(${Math.floor(r*0.6)}, ${Math.floor(g*0.6)}, ${Math.floor(b*0.6)}, 0.9)`;
+    }
+
+    function addSoftGrain(context, w, h) {
+        for (let i = 0; i < 1500; i++) {
+            const x = Math.random() * w;
+            const y = Math.random() * h;
+            const size = Math.random() * 1.5 + 0.5;
+            const isWhite = Math.random() > 0.5;
+            context.fillStyle = isWhite ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+            context.fillRect(x, y, size, size);
+        }
+    }
+
+    async function drawFrame() {
+        if (selfieSegmentation && video.videoWidth > 0) {
+            await selfieSegmentation.send({image: video});
+        }
+        requestAnimationFrame(drawFrame);
+    }
+
+    async function startApp() {
+        loadingOverlay.style.display = 'flex';
+        await setupCamera();
+        video.play();
+        await initSegmentation();
+        loadingOverlay.style.display = 'none';
+        drawFrame(); 
+    }
+
+    // 폰트가 확실히 불려온 뒤에 프로그램 시작
+    document.fonts.ready.then(() => {
+        startApp();
+    });
+</script>
+
+</body>
+</html>
