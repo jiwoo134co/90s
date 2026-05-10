@@ -6,7 +6,6 @@
     <title>90s Magazine Cam</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
     <style>
-        /* 깃허브에 같이 올릴 쌍문동 폰트 파일을 바로 연결합니다 */
         @font-face {
             font-family: 'VintageFont';
             src: url('./Typo_SsangmunDongB.ttf') format('truetype');
@@ -30,12 +29,10 @@
         #canvas {
             width: 100vw;
             height: 100vh;
-            object-fit: cover;
-            /* 90년대 물빠진 필름 색감 */
+            object-fit: cover; /* 화면을 꽉 채우되, 찌그러지지 않게 잘라냄 */
             filter: sepia(0.2) saturate(0.65) contrast(1.15) brightness(1.03);
         }
 
-        /* 옛날 카메라 날짜 UI */
         .ui-overlay {
             position: absolute;
             bottom: 60px;
@@ -52,7 +49,6 @@
             letter-spacing: 2px;
         }
 
-        /* 텍스트 입력창 */
         #input-container {
             position: absolute;
             top: 20px;
@@ -114,9 +110,6 @@
     const ctx = canvas.getContext('2d');
     const userTextInput = document.getElementById('userText');
     const loadingOverlay = document.getElementById('loading-overlay');
-
-    const renderWidth = 1280;
-    const renderHeight = 720;
     
     let selfieSegmentation;
     let userText = "";
@@ -131,7 +124,8 @@
     async function setupCamera() {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+                // 핸드폰 환경에 맞춰서 해상도를 유연하게 요청합니다.
+                video: { facingMode: 'environment', width: { ideal: 1080 }, height: { ideal: 1920 } }
             });
             video.srcObject = stream;
             return new Promise((resolve) => {
@@ -153,9 +147,11 @@
     function onResults(results) {
         if (!video.videoWidth) return;
 
-        if (canvas.width !== renderWidth) {
-            canvas.width = renderWidth;
-            canvas.height = renderHeight;
+        // [비율 해결의 핵심!] 
+        // 캔버스 크기를 억지로 고정하지 않고, 실제 카메라 영상 크기(가로/세로)와 똑같이 맞춥니다.
+        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
         }
 
         ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
@@ -182,7 +178,10 @@
         if (userText !== "") {
             const color = getToneDownColor(originalImage);
             context.fillStyle = color;
-            context.font = "120px 'VintageFont'"; 
+            
+            // 화면 너비에 비례하게 글씨 크기를 설정하여 세로 화면에서도 짤리지 않게 함
+            const fontSize = Math.floor(w * 0.15); 
+            context.font = `${fontSize}px 'VintageFont'`; 
             context.textAlign = 'center';
             context.textBaseline = 'middle';
             
@@ -241,7 +240,6 @@
         drawFrame(); 
     }
 
-    // 폰트가 확실히 불려온 뒤에 프로그램 시작
     document.fonts.ready.then(() => {
         startApp();
     });
